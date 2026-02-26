@@ -57,6 +57,40 @@ export class SipJsSoftphoneEngine {
     }
   }
 
+  bindSessionLifecycle(session, sip) {
+    if (!session || !sip) return;
+
+    session.stateChange.addListener(state => {
+      if (state === sip.SessionState.Establishing) this.emitCallState("ringing");
+      if (state === sip.SessionState.Established) {
+        this.attachRemoteMedia(session);
+        this.emitCallState("connected");
+      }
+      if (state === sip.SessionState.Terminated) {
+        if (this.currentSession === session) this.currentSession = null;
+        if (this.pendingInvitation === session) this.pendingInvitation = null;
+        if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
+        this.emitCallState("idle");
+      }
+    });
+
+    session.delegate = {
+      ...(session.delegate || {}),
+      onBye: () => {
+        if (this.currentSession === session) this.currentSession = null;
+        if (this.pendingInvitation === session) this.pendingInvitation = null;
+        if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
+        this.emitCallState("idle");
+      },
+      onCancel: () => {
+        if (this.currentSession === session) this.currentSession = null;
+        if (this.pendingInvitation === session) this.pendingInvitation = null;
+        if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
+        this.emitCallState("idle");
+      },
+    };
+  }
+
   async ensureSip() {
     if (this.sip) return this.sip;
     try {
@@ -101,19 +135,7 @@ export class SipJsSoftphoneEngine {
             name: invitation.remoteIdentity?.displayName || "Incoming Caller",
             uri: invitation.remoteIdentity?.uri?.toString?.() || "sip:unknown@unknown",
           });
-
-          invitation.stateChange.addListener(state => {
-            if (state === sip.SessionState.Established) {
-              this.attachRemoteMedia(invitation);
-              this.emitCallState("connected");
-            }
-            if (state === sip.SessionState.Terminated) {
-              if (this.currentSession === invitation) this.currentSession = null;
-              this.pendingInvitation = null;
-              if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
-              this.emitCallState("idle");
-            }
-          });
+          this.bindSessionLifecycle(invitation, sip);
         },
       },
     });
@@ -212,18 +234,7 @@ export class SipJsSoftphoneEngine {
 
       this.currentSession = inviter;
       this.emitCallState("dialing");
-      inviter.stateChange.addListener(state => {
-        if (state === sip.SessionState.Establishing) this.emitCallState("ringing");
-        if (state === sip.SessionState.Established) {
-          this.attachRemoteMedia(inviter);
-          this.emitCallState("connected");
-        }
-        if (state === sip.SessionState.Terminated) {
-          if (this.currentSession === inviter) this.currentSession = null;
-          if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
-          this.emitCallState("idle");
-        }
-      });
+      this.bindSessionLifecycle(inviter, sip);
 
       await inviter.invite();
       this.emitLog(`[${new Date().toLocaleTimeString()}] INVITE ${target}`);
