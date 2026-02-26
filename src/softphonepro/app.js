@@ -47,13 +47,22 @@ function MainApp() {
   const [lastRegisterAt, setLastRegisterAt] = useState(null);
   const [diagStatus, setDiagStatus] = useState("idle");
   const [diagDetail, setDiagDetail] = useState("");
+  const [eventLogs, setEventLogs] = useState([]);
   const engineRef = useRef(null);
+  const remoteAudioRef = useRef(null);
 
   const activeProfile = useMemo(() => profiles.find(p => p.id === activeProfileId), [profiles, activeProfileId]);
   const unreadMessages = useMemo(() =>
     Object.values(messages).reduce((c, msgs) => c + msgs.filter(m => m.from !== 'me' && !m.read).length, 0),
     [messages]
   );
+  const addEventLog = useCallback((message, level = "info") => {
+    const timestamp = new Date().toLocaleTimeString();
+    setEventLogs(prev => {
+      const next = [...prev, { id: generateId(), timestamp, level, message }];
+      return next.slice(-50);
+    });
+  }, []);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 768);
@@ -69,18 +78,22 @@ function MainApp() {
       onRegistrationStatus: status => {
         setRegStatus(status);
         if (status === "registered") setLastSipError("");
+        addEventLog(`Registration state -> ${status}`);
       },
       onIncomingCall: caller => {
         setIncomingCall(caller);
         playRingtone(5000);
+        addEventLog(`Incoming INVITE from ${caller?.uri || "unknown"}`);
         addToast(`Incoming call from ${caller?.name || "unknown"}`, "info");
       },
       onCallState: state => {
         setCallState(state);
+        addEventLog(`Call state -> ${state}`);
         if (state === "connected") addToast("Call connected", "success");
       },
       onError: message => {
         setLastSipError(String(message));
+        addEventLog(String(message), "error");
         addToast(message, "error");
         if ((settings.sipBackend || "simulated") === "sipjs" && String(message).includes("sip.js package is not installed")) {
           setSettings(prev => {
@@ -94,18 +107,23 @@ function MainApp() {
       onDiagnosticsStatus: ({ status, detail }) => {
         setDiagStatus(status || "idle");
         setDiagDetail(detail || "");
+        addEventLog(`Diagnostics -> ${status || "idle"}${detail ? ` (${detail})` : ""}`);
       },
-      onLog: () => {},
+      onLog: message => {
+        if (message) addEventLog(String(message));
+      },
     });
 
     engineRef.current = engine;
+    engine.setRemoteAudioElement?.(remoteAudioRef.current);
     setEngineMode(engine.mode);
 
     return () => {
+      engine.setRemoteAudioElement?.(null);
       engine.destroy?.();
       if (engineRef.current === engine) engineRef.current = null;
     };
-  }, [settings.sipBackend, addToast]);
+  }, [settings.sipBackend, addToast, addEventLog]);
 
   useEffect(() => {
     if (activeProfile?.registerOnStartup) {
@@ -126,12 +144,14 @@ function MainApp() {
     if (!profile) return;
     if (regStatus === "registering") return;
     setLastRegisterAt(new Date().toISOString());
+    addEventLog(`Register requested for ${profile.username || "unknown"}@${profile.domain || "unknown"}`);
     engineRef.current?.register?.(profile);
-  }, [activeProfile, regStatus]);
+  }, [activeProfile, regStatus, addEventLog]);
 
   const requestUnregister = useCallback(() => {
+    addEventLog("Unregister requested");
     engineRef.current?.unregister?.();
-  }, []);
+  }, [addEventLog]);
 
   const simulateIncoming = useCallback(() => {
     engineRef.current?.simulateIncoming?.();
@@ -139,17 +159,24 @@ function MainApp() {
 
   const startOutboundCall = useCallback((target, type) => {
     if (!target) return;
+    const canPlaceSipCall = regStatus === "registered" || diagStatus === "registered";
+    if (engineMode === "sipjs" && !canPlaceSipCall) {
+      addToast("SIP is not registered yet. Register successfully before calling.", "error");
+      return;
+    }
     setCallType(type);
     setCallTimer(0);
     setMuted(false);
     setOnHold(false);
     addToast(`Calling ${target}...`, "info");
+    addEventLog(`Outbound INVITE -> ${target}`);
     engineRef.current?.makeCall?.(target, { video: type === "video" });
-  }, [addToast]);
+  }, [addToast, engineMode, regStatus, diagStatus, addEventLog]);
 
   const endActiveCall = useCallback(() => {
+    addEventLog("Hangup requested");
     engineRef.current?.hangup?.();
-  }, []);
+  }, [addEventLog]);
 
   const handleAnswerIncoming = useCallback((type) => {
     if (!incomingCall) return;
@@ -159,6 +186,7 @@ function MainApp() {
     setDialString(caller.uri);
     setCallTimer(0);
     engineRef.current?.answerIncoming?.({ video: type === "video" });
+    addEventLog(`Answering incoming call from ${caller.uri}`);
     setView(type === 'video' ? 'video' : 'dialpad');
     addHistory({
       id: generateId(), direction: 'incoming', type,
@@ -166,20 +194,21 @@ function MainApp() {
       duration: 0, timestamp: new Date().toISOString(), missed: false
     });
     addToast(`Answered call from ${caller.name}`, 'success');
-  }, [incomingCall, addHistory, addToast]);
+  }, [incomingCall, addHistory, addToast, addEventLog]);
 
   const handleDeclineIncoming = useCallback(() => {
     if (!incomingCall) return;
     const caller = incomingCall;
     setIncomingCall(null);
     engineRef.current?.declineIncoming?.();
+    addEventLog(`Declining incoming call from ${caller.uri}`);
     addHistory({
       id: generateId(), direction: 'incoming', type: 'voice',
       contact: caller.uri, contactName: caller.name,
       duration: 0, timestamp: new Date().toISOString(), missed: true
     });
     addToast('Call declined', 'info');
-  }, [incomingCall, addHistory, addToast]);
+  }, [incomingCall, addHistory, addToast, addEventLog]);
 
   const renderView = () => {
     switch (view) {
@@ -207,7 +236,9 @@ function MainApp() {
           profiles, setProfiles, activeProfileId, setActiveProfileId,
           settings, setSettings, regStatus, addToast, simulateIncoming,
           onRequestRegister: requestRegister, onRequestUnregister: requestUnregister, activeBackend: engineMode,
-          lastSipError, lastRegisterAt, diagStatus, diagDetail
+          lastSipError, lastRegisterAt, diagStatus, diagDetail,
+          eventLogs,
+          onClearEventLogs: () => setEventLogs([])
         });
       default:
         return h(DialpadViewModule, {
@@ -246,7 +277,8 @@ function MainApp() {
         }
       }, renderView())
     ),
-    isMobile && h(MobileNav, { view, setView, unreadMessages })
+    isMobile && h(MobileNav, { view, setView, unreadMessages }),
+    h("audio", { ref: remoteAudioRef, autoPlay: true, playsInline: true, style: { display: "none" } })
   );
 }
 

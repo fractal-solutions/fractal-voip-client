@@ -25,12 +25,13 @@ export function SettingsView({
   lastRegisterAt,
   diagStatus,
   diagDetail,
+  eventLogs,
+  onClearEventLogs,
 }) {
   const [settingsTab, setSettingsTab] = useState("accounts");
   const [editingProfile, setEditingProfile] = useState(null);
   const [profileForm, setProfileForm] = useState({ ...defaultProfile });
   const [showPassword, setShowPassword] = useState(false);
-  const [sipLogs, setSipLogs] = useState([]);
 
   const tabs = [
     { id: "accounts", icon: "user", label: "SIP Accounts" },
@@ -70,7 +71,6 @@ export function SettingsView({
   const testConnection = () => {
     addToast("Testing connection...", "info");
     onRequestRegister?.(profileForm);
-    setSipLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] REGISTER sip:${profileForm.domain} SIP/2.0`]);
   };
 
   const updateSetting = (key, value) => {
@@ -226,13 +226,24 @@ export function SettingsView({
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-secondary)" } }, `Last Register Attempt: ${lastRegisterAt ? new Date(lastRegisterAt).toLocaleString() : "Never"}`),
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: lastSipError ? "var(--accent-red)" : "var(--accent-green)" } }, `Last SIP Error: ${lastSipError || "None"}`)
           ),
-          sipLogs.length > 0 &&
+          h(
+            "div",
+            { className: "panel-card", style: { padding: 14 } },
             h(
               "div",
-              null,
-              h("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 } }, h(Icon, { name: "terminal", size: 14, color: "var(--accent-green)" }), h("h4", { style: { fontSize: 13, fontWeight: 500, color: "var(--accent-green)" } }, "SIP Trace")),
-              h("pre", { className: "mono", style: { fontSize: 11, color: "#10b981", background: "#0a0c10", padding: 12, borderRadius: 8, maxHeight: 300, overflowY: "auto", lineHeight: 1.6 } }, sipLogs.join("\n"))
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
+              h("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, h(Icon, { name: "terminal", size: 14, color: "var(--accent-green)" }), h("h4", { style: { fontSize: 13, fontWeight: 500, color: "var(--accent-green)" } }, "Live SIP Event Log")),
+              h("button", { className: "pill-btn", style: { padding: "4px 10px", fontSize: 11 }, onClick: () => onClearEventLogs?.() }, "Clear")
+            ),
+            h("div", { className: "mono", style: { fontSize: 11, color: "var(--text-muted)", marginBottom: 8 } }, `Showing last ${Math.min((eventLogs || []).length, 50)} events`),
+            h(
+              "pre",
+              { className: "mono", style: { fontSize: 11, background: "#0a0c10", padding: 12, borderRadius: 8, maxHeight: 300, overflowY: "auto", lineHeight: 1.6, margin: 0 } },
+              (eventLogs && eventLogs.length > 0
+                ? eventLogs.map(e => `[${e.timestamp}] [${e.level || "info"}] ${e.message}`).join("\n")
+                : "No SIP events yet.")
             )
+          )
         )
     )
   );

@@ -11,6 +11,7 @@ export class SipJsSoftphoneEngine {
     this.activeProfile = null;
     this.registerPromise = null;
     this.diagnosticsStatus = "idle";
+    this.remoteAudioElement = null;
   }
 
   emitRegistration(status) {
@@ -28,6 +29,27 @@ export class SipJsSoftphoneEngine {
   emitDiagnostics(status, detail = "") {
     this.diagnosticsStatus = status;
     this.callbacks.onDiagnosticsStatus?.({ status, detail });
+  }
+
+  setRemoteAudioElement(element) {
+    this.remoteAudioElement = element || null;
+  }
+
+  attachRemoteMedia(session) {
+    try {
+      const peerConnection = session?.sessionDescriptionHandler?.peerConnection;
+      if (!peerConnection || !this.remoteAudioElement) return;
+      const remoteStream = new MediaStream();
+      peerConnection.getReceivers().forEach(receiver => {
+        if (receiver?.track) remoteStream.addTrack(receiver.track);
+      });
+      this.remoteAudioElement.srcObject = remoteStream;
+      this.remoteAudioElement.autoplay = true;
+      this.remoteAudioElement.playsInline = true;
+      this.remoteAudioElement.play?.().catch(() => {});
+    } catch (error) {
+      this.callbacks.onError?.(String(error?.message || error));
+    }
   }
 
   async ensureSip() {
@@ -76,7 +98,10 @@ export class SipJsSoftphoneEngine {
           });
 
           invitation.stateChange.addListener(state => {
-            if (state === sip.SessionState.Established) this.emitCallState("connected");
+            if (state === sip.SessionState.Established) {
+              this.attachRemoteMedia(invitation);
+              this.emitCallState("connected");
+            }
             if (state === sip.SessionState.Terminated) this.emitCallState("idle");
           });
         },
@@ -86,6 +111,14 @@ export class SipJsSoftphoneEngine {
     this.emitDiagnostics("connecting", profile.wsUrl);
     await this.userAgent.start();
     this.registerer = new sip.Registerer(this.userAgent);
+    this.registerer.stateChange.addListener(state => {
+      if (state === sip.RegistererState.Registered) {
+        this.emitRegistration("registered");
+        this.emitDiagnostics("registered", profile?.wsUrl || "");
+      } else if (state === sip.RegistererState.Unregistered || state === sip.RegistererState.Terminated) {
+        this.emitRegistration("unregistered");
+      }
+    });
   }
 
   async register(profile) {
@@ -151,7 +184,10 @@ export class SipJsSoftphoneEngine {
       this.emitCallState("dialing");
       inviter.stateChange.addListener(state => {
         if (state === sip.SessionState.Establishing) this.emitCallState("ringing");
-        if (state === sip.SessionState.Established) this.emitCallState("connected");
+        if (state === sip.SessionState.Established) {
+          this.attachRemoteMedia(inviter);
+          this.emitCallState("connected");
+        }
         if (state === sip.SessionState.Terminated) this.emitCallState("idle");
       });
 
@@ -197,6 +233,7 @@ export class SipJsSoftphoneEngine {
       });
       this.currentSession = invitation;
       this.pendingInvitation = null;
+      this.attachRemoteMedia(invitation);
       this.emitCallState("connected");
     } catch (error) {
       this.callbacks.onError?.(String(error?.message || error));
@@ -227,6 +264,7 @@ export class SipJsSoftphoneEngine {
     this.currentSession = null;
     this.pendingInvitation = null;
     this.registerPromise = null;
+    if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
     this.emitDiagnostics("idle", "");
   }
 }
