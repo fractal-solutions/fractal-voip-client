@@ -86,6 +86,30 @@ function MainApp() {
         addEventLog(`Incoming INVITE from ${caller?.uri || "unknown"}`);
         addToast(`Incoming call from ${caller?.name || "unknown"}`, "info");
       },
+      onIncomingMessage: message => {
+        const from = message?.from || "sip:unknown@unknown";
+        const text = String(message?.text || "").trim();
+        if (!text) return;
+        setMessages(prev => {
+          const updated = {
+            ...prev,
+            [from]: [
+              ...(prev[from] || []),
+              {
+                id: generateId(),
+                from,
+                text,
+                timestamp: message?.timestamp || new Date().toISOString(),
+                read: false,
+              },
+            ],
+          };
+          saveData("messages", updated);
+          return updated;
+        });
+        addEventLog(`Incoming MESSAGE from ${from}`);
+        addToast(`Message from ${from}`, "info");
+      },
       onCallState: state => {
         setCallState(state);
         addEventLog(`Call state -> ${state}`);
@@ -178,6 +202,33 @@ function MainApp() {
     engineRef.current?.hangup?.();
   }, [addEventLog]);
 
+  const sendInstantMessage = useCallback(async (target, text) => {
+    const to = String(target || "").trim();
+    const body = String(text || "").trim();
+    if (!to || !body) return;
+
+    const msg = {
+      id: generateId(),
+      from: "me",
+      text: body,
+      timestamp: new Date().toISOString(),
+      read: true,
+    };
+
+    setMessages(prev => {
+      const updated = { ...prev, [to]: [...(prev[to] || []), msg] };
+      saveData("messages", updated);
+      return updated;
+    });
+
+    try {
+      await engineRef.current?.sendMessage?.(to, body);
+      addEventLog(`Outgoing MESSAGE to ${to}`);
+    } catch {
+      // Engine callback already emits user-visible error.
+    }
+  }, [addEventLog]);
+
   const handleAnswerIncoming = useCallback((type) => {
     if (!incomingCall) return;
     const caller = incomingCall;
@@ -220,7 +271,10 @@ function MainApp() {
           muted, setMuted, onHold, setOnHold
         });
       case 'messages':
-        return h(MessagesViewModule, { Icon, Avatar, messages, setMessages, contacts });
+        return h(MessagesViewModule, {
+          Icon, Avatar, messages, setMessages, contacts,
+          onSendMessage: sendInstantMessage
+        });
       case 'video':
         return h(VideoViewModule, { Icon, Avatar, addToast });
       case 'conference':

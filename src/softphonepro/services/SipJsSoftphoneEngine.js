@@ -137,6 +137,27 @@ export class SipJsSoftphoneEngine {
           });
           this.bindSessionLifecycle(invitation, sip);
         },
+        onMessage: async incomingMessage => {
+          try {
+            await incomingMessage?.accept?.();
+          } catch {}
+
+          const fromUri =
+            incomingMessage?.remoteIdentity?.uri?.toString?.() ||
+            incomingMessage?.request?.from?.uri?.toString?.() ||
+            "sip:unknown@unknown";
+          const body =
+            incomingMessage?.request?.body ??
+            incomingMessage?.message?.body ??
+            "";
+
+          this.callbacks.onIncomingMessage?.({
+            from: fromUri,
+            text: String(body || ""),
+            timestamp: new Date().toISOString(),
+          });
+          this.emitLog(`[${new Date().toLocaleTimeString()}] MESSAGE from ${fromUri}`);
+        },
       },
     });
 
@@ -241,6 +262,28 @@ export class SipJsSoftphoneEngine {
     } catch (error) {
       this.emitCallState("idle");
       this.callbacks.onError?.(String(error?.message || error));
+    }
+  }
+
+  async sendMessage(target, text) {
+    try {
+      const sip = await this.ensureSip();
+      if (!this.userAgent) throw new Error("SIP user agent not initialized. Register first.");
+      if (!this.transportConnected) throw new Error("Transport disconnected. Re-register before messaging.");
+
+      const to = String(target || "").trim();
+      const body = String(text || "").trim();
+      if (!to || !body) return;
+
+      const targetUri = sip.UserAgent.makeURI(to.startsWith("sip:") ? to : `sip:${to}`);
+      if (!targetUri) throw new Error("Invalid MESSAGE target URI.");
+
+      const messager = new sip.Messager(this.userAgent, targetUri, body);
+      await messager.message();
+      this.emitLog(`[${new Date().toLocaleTimeString()}] MESSAGE to ${to}`);
+    } catch (error) {
+      this.callbacks.onError?.(String(error?.message || error));
+      throw error;
     }
   }
 

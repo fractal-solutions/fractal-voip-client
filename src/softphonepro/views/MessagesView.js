@@ -4,21 +4,26 @@ import { formatRelativeTime, generateId } from "../lib/utils";
 
 const h = React.createElement;
 
-export function MessagesView({ Icon, Avatar, messages, setMessages, contacts }) {
+export function MessagesView({ Icon, Avatar, messages, setMessages, contacts, onSendMessage }) {
   const [activeThread, setActiveThread] = useState(null);
   const [input, setInput] = useState("");
   const [newMsgUri, setNewMsgUri] = useState("");
   const [showNew, setShowNew] = useState(false);
   const threads = Object.keys(messages);
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!input.trim() || !activeThread) return;
-    const newMsg = { id: generateId(), from: "me", text: input.trim(), timestamp: new Date().toISOString(), read: true };
-    setMessages(prev => {
-      const updated = { ...prev, [activeThread]: [...(prev[activeThread] || []), newMsg] };
-      saveData("messages", updated);
-      return updated;
-    });
+    const text = input.trim();
+    if (onSendMessage) {
+      await onSendMessage(activeThread, text);
+    } else {
+      const newMsg = { id: generateId(), from: "me", text, timestamp: new Date().toISOString(), read: true };
+      setMessages(prev => {
+        const updated = { ...prev, [activeThread]: [...(prev[activeThread] || []), newMsg] };
+        saveData("messages", updated);
+        return updated;
+      });
+    }
     setInput("");
   };
 

@@ -41,6 +41,18 @@ export class SimulatedSoftphoneEngine {
     this.emitLog(`INVITE ${target} SIP/2.0`);
   }
 
+  async sendMessage(target, text) {
+    this.emitLog(`MESSAGE ${target} SIP/2.0`);
+    const t = setTimeout(() => {
+      this.callbacks.onIncomingMessage?.({
+        from: target,
+        text: `Echo: ${text}`,
+        timestamp: new Date().toISOString(),
+      });
+    }, 400);
+    this.timers.push(t);
+  }
+
   hangup() {
     this.emitCallState("idle");
     this.emitLog("BYE SIP/2.0");
