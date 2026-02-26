@@ -4,6 +4,14 @@ import { DIALPAD_LABELS, playDTMF, playRingtone } from "./lib/audio";
 import { loadData, saveData } from "./lib/storage";
 import { avatarColors, formatDuration, formatRelativeTime, generateId, getAvatarColor, getInitials } from "./lib/utils";
 import { createSoftphoneEngine } from "./services/createSoftphoneEngine";
+import { DialpadView as DialpadViewModule } from "./views/DialpadView";
+import { MessagesView as MessagesViewModule } from "./views/MessagesView";
+import { HistoryView as HistoryViewModule } from "./views/HistoryView";
+import { ContactsView as ContactsViewModule } from "./views/ContactsView";
+import { VideoView as VideoViewModule } from "./views/VideoView";
+import { ConferenceView as ConferenceViewModule } from "./views/ConferenceView";
+import { SettingsView as SettingsViewModule } from "./views/SettingsView";
+import { IncomingCallOverlay as IncomingCallOverlayModule } from "./views/IncomingCallOverlay";
 
 const h = React.createElement;
 
@@ -1793,6 +1801,8 @@ function MainApp() {
   const [incomingCall, setIncomingCall] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [engineMode, setEngineMode] = useState(settings.sipBackend || "simulated");
+  const [lastSipError, setLastSipError] = useState("");
+  const [lastRegisterAt, setLastRegisterAt] = useState(null);
   const engineRef = useRef(null);
 
   const activeProfile = useMemo(() => profiles.find(p => p.id === activeProfileId), [profiles, activeProfileId]);
@@ -1812,7 +1822,10 @@ function MainApp() {
 
   useEffect(() => {
     const engine = createSoftphoneEngine(settings.sipBackend || "simulated", {
-      onRegistrationStatus: setRegStatus,
+      onRegistrationStatus: status => {
+        setRegStatus(status);
+        if (status === "registered") setLastSipError("");
+      },
       onIncomingCall: caller => {
         setIncomingCall(caller);
         playRingtone(5000);
@@ -1823,6 +1836,7 @@ function MainApp() {
         if (state === "connected") addToast("Call connected", "success");
       },
       onError: message => {
+        setLastSipError(String(message));
         addToast(message, "error");
         if ((settings.sipBackend || "simulated") === "sipjs" && String(message).includes("sip.js package is not installed")) {
           setSettings(prev => {
@@ -1862,6 +1876,7 @@ function MainApp() {
   const requestRegister = useCallback((profileOverride) => {
     const profile = profileOverride || activeProfile;
     if (!profile) return;
+    setLastRegisterAt(new Date().toISOString());
     engineRef.current?.register?.(profile);
   }, [activeProfile]);
 
@@ -1920,29 +1935,34 @@ function MainApp() {
   const renderView = () => {
     switch (view) {
       case 'dialpad':
-        return h(DialpadView, {
+        return h(DialpadViewModule, {
+          Icon, Avatar,
           dialString, setDialString, callState, callType,
           callTimer, setCallTimer, addHistory, contacts, addToast, onStartCall: startOutboundCall, onEndCall: endActiveCall,
           muted, setMuted, onHold, setOnHold
         });
       case 'messages':
-        return h(MessagesView, { messages, setMessages, contacts });
+        return h(MessagesViewModule, { Icon, Avatar, messages, setMessages, contacts });
       case 'video':
-        return h(VideoView, { addToast });
+        return h(VideoViewModule, { Icon, Avatar, addToast });
       case 'conference':
-        return h(ConferenceView, { addToast });
+        return h(ConferenceViewModule, { Icon, Avatar, addToast });
       case 'history':
-        return h(HistoryView, { history, setHistory, setDialString, setView });
+        return h(HistoryViewModule, { Icon, Avatar, history, setHistory, setDialString, setView });
       case 'contacts':
-        return h(ContactsView, { contacts, setContacts, setDialString, setView, addToast });
+        return h(ContactsViewModule, { Icon, Avatar, contacts, setContacts, setDialString, setView, addToast });
       case 'settings':
-        return h(SettingsView, {
+        return h(SettingsViewModule, {
+          Icon, Toggle,
+          activeProfile,
           profiles, setProfiles, activeProfileId, setActiveProfileId,
           settings, setSettings, regStatus, addToast, simulateIncoming,
-          onRequestRegister: requestRegister, onRequestUnregister: requestUnregister, activeBackend: engineMode
+          onRequestRegister: requestRegister, onRequestUnregister: requestUnregister, activeBackend: engineMode,
+          lastSipError, lastRegisterAt
         });
       default:
-        return h(DialpadView, {
+        return h(DialpadViewModule, {
+          Icon, Avatar,
           dialString, setDialString, callState, callType,
           callTimer, setCallTimer, addHistory, contacts, addToast, onStartCall: startOutboundCall, onEndCall: endActiveCall,
           muted, setMuted, onHold, setOnHold
@@ -1956,7 +1976,8 @@ function MainApp() {
       background: 'var(--bg-primary)'
     }
   },
-    incomingCall && h(IncomingCallOverlay, {
+    incomingCall && h(IncomingCallOverlayModule, {
+      Icon,
       caller: incomingCall,
       onAnswer: () => handleAnswerIncoming('voice'),
       onAnswerVideo: () => handleAnswerIncoming('video'),
