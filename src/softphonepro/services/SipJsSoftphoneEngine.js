@@ -12,6 +12,7 @@ export class SipJsSoftphoneEngine {
     this.registerPromise = null;
     this.diagnosticsStatus = "idle";
     this.remoteAudioElement = null;
+    this.transportConnected = false;
   }
 
   emitRegistration(status) {
@@ -40,6 +41,10 @@ export class SipJsSoftphoneEngine {
       const peerConnection = session?.sessionDescriptionHandler?.peerConnection;
       if (!peerConnection || !this.remoteAudioElement) return;
       const remoteStream = new MediaStream();
+      peerConnection.ontrack = event => {
+        event.streams?.[0]?.getTracks?.().forEach(track => remoteStream.addTrack(track));
+        if (event.track) remoteStream.addTrack(event.track);
+      };
       peerConnection.getReceivers().forEach(receiver => {
         if (receiver?.track) remoteStream.addTrack(receiver.track);
       });
@@ -102,14 +107,37 @@ export class SipJsSoftphoneEngine {
               this.attachRemoteMedia(invitation);
               this.emitCallState("connected");
             }
-            if (state === sip.SessionState.Terminated) this.emitCallState("idle");
+            if (state === sip.SessionState.Terminated) {
+              if (this.currentSession === invitation) this.currentSession = null;
+              this.pendingInvitation = null;
+              if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
+              this.emitCallState("idle");
+            }
           });
         },
       },
     });
 
+    const transport = this.userAgent.transport;
+    if (transport?.stateChange?.addListener) {
+      transport.stateChange.addListener(state => {
+        if (state === sip.TransportState.Connected) {
+          this.transportConnected = true;
+          this.emitDiagnostics("connecting", profile.wsUrl);
+        } else if (state === sip.TransportState.Connecting) {
+          this.transportConnected = false;
+          this.emitDiagnostics("connecting", profile.wsUrl);
+        } else if (state === sip.TransportState.Disconnected) {
+          this.transportConnected = false;
+          this.emitRegistration("unregistered");
+          this.emitDiagnostics("ws_failed", "WebSocket disconnected");
+        }
+      });
+    }
+
     this.emitDiagnostics("connecting", profile.wsUrl);
     await this.userAgent.start();
+    this.transportConnected = true;
     this.registerer = new sip.Registerer(this.userAgent);
     this.registerer.stateChange.addListener(state => {
       if (state === sip.RegistererState.Registered) {
@@ -156,6 +184,7 @@ export class SipJsSoftphoneEngine {
   async unregister() {
     try {
       await this.registerer?.unregister?.();
+      this.transportConnected = false;
       this.emitRegistration("unregistered");
       this.emitDiagnostics("idle", "");
     } catch (error) {
@@ -167,6 +196,7 @@ export class SipJsSoftphoneEngine {
     try {
       const sip = await this.ensureSip();
       if (!this.userAgent) throw new Error("SIP user agent not initialized. Register first.");
+      if (!this.transportConnected) throw new Error("Transport disconnected. Re-register before calling.");
 
       const targetUri = sip.UserAgent.makeURI(target.startsWith("sip:") ? target : `sip:${target}`);
       if (!targetUri) throw new Error("Invalid target URI.");
@@ -188,7 +218,11 @@ export class SipJsSoftphoneEngine {
           this.attachRemoteMedia(inviter);
           this.emitCallState("connected");
         }
-        if (state === sip.SessionState.Terminated) this.emitCallState("idle");
+        if (state === sip.SessionState.Terminated) {
+          if (this.currentSession === inviter) this.currentSession = null;
+          if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
+          this.emitCallState("idle");
+        }
       });
 
       await inviter.invite();
@@ -201,15 +235,24 @@ export class SipJsSoftphoneEngine {
 
   async hangup() {
     try {
+      const sip = await this.ensureSip();
       const session = this.currentSession;
       if (!session) {
         this.emitCallState("idle");
         return;
       }
 
-      if (session.bye) await session.bye();
-      else if (session.cancel) await session.cancel();
-      else if (session.reject) await session.reject();
+      const state = session.state;
+
+      // Outbound INVITE not established yet must be cancelled, not BYE'd.
+      if (state === sip.SessionState.Initial || state === sip.SessionState.Establishing) {
+        if (session.cancel) await session.cancel();
+        else if (session.reject) await session.reject();
+      } else if (state === sip.SessionState.Established) {
+        if (session.bye) await session.bye();
+      } else if (session.bye) {
+        await session.bye();
+      }
 
       this.emitCallState("idle");
       this.currentSession = null;
@@ -264,6 +307,7 @@ export class SipJsSoftphoneEngine {
     this.currentSession = null;
     this.pendingInvitation = null;
     this.registerPromise = null;
+    this.transportConnected = false;
     if (this.remoteAudioElement) this.remoteAudioElement.srcObject = null;
     this.emitDiagnostics("idle", "");
   }
