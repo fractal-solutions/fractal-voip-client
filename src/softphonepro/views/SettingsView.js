@@ -23,6 +23,8 @@ export function SettingsView({
   activeBackend,
   lastSipError,
   lastRegisterAt,
+  diagStatus,
+  diagDetail,
 }) {
   const [settingsTab, setSettingsTab] = useState("accounts");
   const [editingProfile, setEditingProfile] = useState(null);
@@ -219,6 +221,8 @@ export function SettingsView({
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-secondary)" } }, `User/Domain: ${activeProfile?.username || "N/A"} @ ${activeProfile?.domain || "N/A"}`),
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-secondary)" } }, `WebSocket Target: ${activeProfile?.wsUrl || "N/A"}`),
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-secondary)" } }, `Backend: ${activeBackend}`),
+            h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-secondary)" } }, `Diagnostics Status: ${diagStatus || "idle"}`),
+            diagDetail ? h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-muted)" } }, `Diagnostics Detail: ${diagDetail}`) : null,
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: "var(--text-secondary)" } }, `Last Register Attempt: ${lastRegisterAt ? new Date(lastRegisterAt).toLocaleString() : "Never"}`),
             h("div", { className: "mono", style: { fontSize: 12, lineHeight: 1.7, color: lastSipError ? "var(--accent-red)" : "var(--accent-green)" } }, `Last SIP Error: ${lastSipError || "None"}`)
           ),

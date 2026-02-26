@@ -9,6 +9,8 @@ export class SipJsSoftphoneEngine {
     this.currentSession = null;
     this.pendingInvitation = null;
     this.activeProfile = null;
+    this.registerPromise = null;
+    this.diagnosticsStatus = "idle";
   }
 
   emitRegistration(status) {
@@ -21,6 +23,11 @@ export class SipJsSoftphoneEngine {
 
   emitLog(message) {
     this.callbacks.onLog?.(message);
+  }
+
+  emitDiagnostics(status, detail = "") {
+    this.diagnosticsStatus = status;
+    this.callbacks.onDiagnosticsStatus?.({ status, detail });
   }
 
   async ensureSip() {
@@ -76,28 +83,48 @@ export class SipJsSoftphoneEngine {
       },
     });
 
+    this.emitDiagnostics("connecting", profile.wsUrl);
     await this.userAgent.start();
     this.registerer = new sip.Registerer(this.userAgent);
   }
 
   async register(profile) {
+    if (this.registerPromise) return this.registerPromise;
+
+    this.registerPromise = (async () => {
     try {
       this.emitRegistration("registering");
       await this.setupUserAgent(profile);
       if (!this.registerer) throw new Error("SIP registerer was not initialized.");
       await this.registerer.register();
       this.emitRegistration("registered");
+      this.emitDiagnostics("registered", profile?.wsUrl || "");
       this.emitLog(`[${new Date().toLocaleTimeString()}] REGISTER ok`);
     } catch (error) {
       this.emitRegistration("unregistered");
+      const message = String(error?.message || error);
+      const lower = message.toLowerCase();
+      if (lower.includes("websocket") || lower.includes("1006") || lower.includes("connecting")) {
+        this.emitDiagnostics("ws_failed", message);
+      } else if (lower.includes("tls") || lower.includes("certificate") || lower.includes("ssl")) {
+        this.emitDiagnostics("tls_likely_issue", message);
+      } else {
+        this.emitDiagnostics("error", message);
+      }
       this.callbacks.onError?.(String(error?.message || error));
+    } finally {
+      this.registerPromise = null;
     }
+    })();
+
+    return this.registerPromise;
   }
 
   async unregister() {
     try {
       await this.registerer?.unregister?.();
       this.emitRegistration("unregistered");
+      this.emitDiagnostics("idle", "");
     } catch (error) {
       this.callbacks.onError?.(String(error?.message || error));
     }
@@ -199,5 +226,7 @@ export class SipJsSoftphoneEngine {
     this.userAgent = null;
     this.currentSession = null;
     this.pendingInvitation = null;
+    this.registerPromise = null;
+    this.emitDiagnostics("idle", "");
   }
 }

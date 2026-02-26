@@ -45,6 +45,8 @@ function MainApp() {
   const [engineMode, setEngineMode] = useState(settings.sipBackend || "simulated");
   const [lastSipError, setLastSipError] = useState("");
   const [lastRegisterAt, setLastRegisterAt] = useState(null);
+  const [diagStatus, setDiagStatus] = useState("idle");
+  const [diagDetail, setDiagDetail] = useState("");
   const engineRef = useRef(null);
 
   const activeProfile = useMemo(() => profiles.find(p => p.id === activeProfileId), [profiles, activeProfileId]);
@@ -89,6 +91,10 @@ function MainApp() {
           addToast("Falling back to simulated backend.", "info");
         }
       },
+      onDiagnosticsStatus: ({ status, detail }) => {
+        setDiagStatus(status || "idle");
+        setDiagDetail(detail || "");
+      },
       onLog: () => {},
     });
 
@@ -118,9 +124,10 @@ function MainApp() {
   const requestRegister = useCallback((profileOverride) => {
     const profile = profileOverride || activeProfile;
     if (!profile) return;
+    if (regStatus === "registering") return;
     setLastRegisterAt(new Date().toISOString());
     engineRef.current?.register?.(profile);
-  }, [activeProfile]);
+  }, [activeProfile, regStatus]);
 
   const requestUnregister = useCallback(() => {
     engineRef.current?.unregister?.();
@@ -200,7 +207,7 @@ function MainApp() {
           profiles, setProfiles, activeProfileId, setActiveProfileId,
           settings, setSettings, regStatus, addToast, simulateIncoming,
           onRequestRegister: requestRegister, onRequestUnregister: requestUnregister, activeBackend: engineMode,
-          lastSipError, lastRegisterAt
+          lastSipError, lastRegisterAt, diagStatus, diagDetail
         });
       default:
         return h(DialpadViewModule, {
