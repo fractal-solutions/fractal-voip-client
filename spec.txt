@@ -1,0 +1,30 @@
+PROJECT: Custom WebRTC SIP Client for FreeSWITCH
+
+Goal:
+Build a secure browser-based softphone using SIP.js that connects to FreeSWITCH over WSS and supports extension login, outgoing and incoming audio calls.
+
+Requirements:
+Must connect over WSS to port 7443.
+Must authenticate via dynamically fetched SIP credentials from Bun backend.
+Must support:
+	Register
+	Invite
+	Accept
+	Reject
+	Hangup
+	Mute
+
+Must use OPUS codec.
+Must attach remote audio stream correctly.
+Must expose call state via reactive state management.
+Must handle reconnection logic if WebSocket drops.
+Must not store SIP passwords in frontend code.
+Must be modular for expansion into video calls.
+
+Deliverables:
+
+userAgent.ts
+callManager.ts
+minimal UI
+Bun endpoint for credential issuance
+README with deployment instructions
